@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>遠回り Slideshow Maker</title>
+<style>
+:root{--paper:#f5f1e9;--ink:#292724;--line:#d8d0c4}*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif}
+main{max-width:720px;margin:auto;padding:28px 18px 60px}h1{font-size:25px;margin:0 0 6px}.sub{opacity:.65;margin:0 0 24px}
+.card{border:1px solid var(--line);border-radius:16px;padding:16px;margin:14px 0;background:#ffffff55}
+input[type=file]{width:100%;font-size:16px}.status{font-weight:700;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.cell img{width:100%;aspect-ratio:9/14;object-fit:contain;background:#ebe5da;border-radius:7px}
+.ctrl{display:flex;gap:4px;margin-top:5px}.ctrl button{flex:1;padding:7px;background:transparent;border:1px solid #aaa;border-radius:8px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}input[type=number]{width:80px;padding:10px;font-size:18px;border:1px solid var(--line);border-radius:9px}
+button.primary{width:100%;padding:14px;border:0;border-radius:12px;background:var(--ink);color:var(--paper);font-size:17px;font-weight:700}
+button.primary:disabled{opacity:.35}.note{font-size:13px;opacity:.68;line-height:1.6}progress{width:100%}#result a{display:block;text-align:center;padding:14px;border:1px solid var(--ink);border-radius:12px;color:inherit;text-decoration:none;font-weight:700}
+</style></head><body><main>
+<h1>遠回り Slideshow Maker</h1><p class="sub">画像 → 秒数 → 動画。画像間は自動フェード。</p>
+<div class="card"><input id="picker" type="file" accept="image/*" multiple><div id="status" class="status">画像を選択してください。</div><div id="grid" class="grid"></div></div>
+<div class="card"><div class="row"><strong>1枚の表示時間</strong><input id="seconds" type="number" min="3" max="30" step="1" value="10"><span>秒</span></div><p class="note">全画像共通／フェード0.7秒固定／9:16／無音</p></div>
+<button id="make" class="primary" disabled>動画を作る</button>
+<div id="work" class="card" hidden><div id="msg">準備中…</div><progress id="prog" max="1" value="0"></progress></div><div id="result"></div>
+<p class="note">iPhone SafariでMP4書き出しに対応していない場合はWebMになります。まず実機で画像選択と動画生成を検証します。</p>
+<script>
+let files=[];const p=document.querySelector('#picker'),s=document.querySelector('#status'),g=document.querySelector('#grid'),mk=document.querySelector('#make');
+p.onchange=()=>{files=Array.from(p.files||[]);s.textContent=files.length+'枚選択しました。';render();mk.disabled=files.length<2};
+function render(){g.innerHTML='';files.forEach((f,i)=>{let d=document.createElement('div');d.className='cell';let im=document.createElement('img');im.src=URL.createObjectURL(f);let c=document.createElement('div');c.className='ctrl';c.innerHTML='<button>↑</button><button>↓</button>';c.children[0].onclick=()=>mv(i,-1);c.children[1].onclick=()=>mv(i,1);d.append(im,c);g.append(d)})}
+function mv(i,n){let j=i+n;if(j<0||j>=files.length)return;[files[i],files[j]]=[files[j],files[i]];render()}
+function load(f){return new Promise((r,j)=>{let im=new Image;im.onload=()=>r(im);im.onerror=j;im.src=URL.createObjectURL(f)})}
+function draw(ctx,im,W,H,a){let q=Math.min(W/im.width,H/im.height),w=im.width*q,h=im.height*q;ctx.fillStyle='#f5f1e9';ctx.fillRect(0,0,W,H);ctx.save();ctx.globalAlpha=a;ctx.drawImage(im,(W-w)/2,(H-h)/2,w,h);ctx.restore()}
+mk.onclick=async()=>{const work=document.querySelector('#work'),msg=document.querySelector('#msg'),prog=document.querySelector('#prog'),res=document.querySelector('#result');work.hidden=false;res.innerHTML='';mk.disabled=true;
+try{let sec=Math.max(3,Math.min(30,+document.querySelector('#seconds').value||10)),fade=.7,W=720,H=1280,fps=30,ims=[];for(let f of files)ims.push(await load(f));
+let cv=document.createElement('canvas');cv.width=W;cv.height=H;let ctx=cv.getContext('2d'),stream=cv.captureStream(fps);
+let mime=['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm'].find(x=>MediaRecorder.isTypeSupported(x));if(!mime)throw Error('このSafariではMediaRecorder動画出力が使えません');
+let chunks=[],rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6000000});rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);let stop=new Promise(r=>rec.onstop=r);rec.start(1000);
+let total=files.length*sec,start=performance.now();while(1){let t=(performance.now()-start)/1000;if(t>=total)break;let i=Math.min(files.length-1,Math.floor(t/sec)),local=t-i*sec,a=1;if(local<fade)a=local/fade;if(local>sec-fade)a=Math.max(0,(sec-local)/fade);draw(ctx,ims[i],W,H,a);prog.value=t/total;msg.textContent='動画作成中… '+Math.round(100*t/total)+'%';await new Promise(r=>requestAnimationFrame(r))}
+rec.stop();await stop;prog.value=1;msg.textContent='完成';let blob=new Blob(chunks,{type:mime}),url=URL.createObjectURL(blob),ext=mime.includes('mp4')?'mp4':'webm';res.innerHTML='<a download="toomawari-slideshow.'+ext+'" href="'+url+'">動画を保存（'+ext.toUpperCase()+'）</a>';
+}catch(e){msg.textContent='作成できませんでした：'+e.message}finally{mk.disabled=files.length<2}};
+</script></main></body></html>
